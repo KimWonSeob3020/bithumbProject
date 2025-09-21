@@ -31,8 +31,8 @@ class Bithumb_api:
         order_info = self.private_bithumb.sell_market_order(ticker, volume)
         return order_info
 
-    def get_ohlcv(self, ticker: str, interval: str = "day", count: int = 200, period: float = 0.1):
-        ohlcv_info = self.public_bithumb.get_ohlcv(ticker, interval, count, period);
+    def get_ohlcv(self, ticker: str, interval: str = "day", count: int = 200, period: float = 0.1, to: str = None):
+        ohlcv_info = self.public_bithumb.get_ohlcv(ticker, interval, count, period, to)
         return ohlcv_info
 
     def get_market_all(self):

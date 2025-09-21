@@ -8,6 +8,7 @@ from support_resistance import find_support_resistance
 from rsi_divergence import rsi_divergence
 from atr_stop import atr_stop_exit
 from position_manager import save_positions, load_positions
+
 import python_bithumb_api
 
 def main(ticker, prices, high, low, close):
@@ -21,66 +22,54 @@ def main(ticker, prices, high, low, close):
     :return: 매수/매도 포지션 리스트
     """
 
-    # numpy array 형태로 변환하여 talib 함수 계산 정확도 향상
     prices = np.array(prices, dtype=np.float64)
     high = np.array(high, dtype=np.float64)
     low = np.array(low, dtype=np.float64)
     close = np.array(close, dtype=np.float64)
 
-    # RSI 기반 매수/매도 신호 계산
-    signals = rsi_signals(prices)
-
-    # RSI 값 계산 (다이버전스 탐색용)
+    signals = rsi_signals(prices, low=40, high=60)
     rsi = talib.RSI(prices, timeperiod=14)
-    # ATR(평균 진폭) 계산 - 손절/익절 청산 조건에서 활용
     atr = talib.ATR(high, low, close, timeperiod=14)
 
-    # 스윙 지지/저항 위치 탐색 (전환점)
-    support, resistance = find_support_resistance(prices)
+    # tolerance를 40으로 확장
+    support, resistance = find_support_resistance(prices, tolerance=40)
 
-    # RSI 다이버전스 위치 탐색 (강세/약세 구분)
-    bullish_diverge, bearish_diverge = rsi_divergence(prices, rsi)
+    # 다이버전스 window 파라미터 5로 축소
+    bullish_diverge, bearish_diverge = rsi_divergence(prices, rsi, window=5)
 
     positions = []
+
     for i in range(len(signals)):
         signal = signals[i]
 
-        # === 지지/저항 근처 여부 판단 ===
-        # 기존 ±10 범위 대신 ±20 범위로 확장하여 더 넓은 범위 인정
-        near_support = any(abs(s[0] - i) <= 20 for s in support)
-        near_resistance = any(abs(r[0] - i) <= 20 for r in resistance)
-
-        # === 매수 조건 ===
-        # RSI 매수신호 + 강세 다이버전스 + 지지선 근처
-        if signal == 1 and i in bullish_diverge and near_support:
-            # ATR 손절익절 함수에서 이익 실현 비율(rr_ratio) 1.2로 설정하여 빠른 익절 가능
-            exit_idx, exit_type = atr_stop_exit(prices, atr, i, rr_ratio=1.2)
+        # 신호만으로 매수/매도 실행, 가격 정보 포함 출력
+        if signal == 1:
+            exit_idx, exit_type = atr_stop_exit(prices, atr, i, rr_ratio=1.5)
+            entry_price = prices[i]
+            exit_price = prices[exit_idx] if exit_idx < len(prices) else None
             positions.append({'ticker': ticker, 'entry': i, 'exit': exit_idx, 'type': 'buy', 'exit_type': exit_type})
+            print(f"Buy triggered at index {i} (price: {entry_price:.2f}), exit at {exit_idx} (price: {exit_price:.2f}) ({exit_type})")
 
-        # === 매도 조건 ===
-        # RSI 매도신호 + 약세 다이버전스 + 저항선 근처
-        elif signal == -1 and i in bearish_diverge and near_resistance:
-            exit_idx, exit_type = atr_stop_exit(prices, atr, i, rr_ratio=1.2)
+        elif signal == -1:
+            exit_idx, exit_type = atr_stop_exit(prices, atr, i, rr_ratio=1.5)
+            entry_price = prices[i]
+            exit_price = prices[exit_idx] if exit_idx < len(prices) else None
             positions.append({'ticker': ticker, 'entry': i, 'exit': exit_idx, 'type': 'sell', 'exit_type': exit_type})
+            print(f"Sell triggered at index {i} (price: {entry_price:.2f}), exit at {exit_idx} (price: {exit_price:.2f}) ({exit_type})")
 
-    # 포지션 리스트를 JSON 파일로 저장
     save_positions(positions, 'positions.json')
     return positions
 
 
 if __name__ == "__main__":
-
     bithumb_api = python_bithumb_api.Bithumb_api()
-
     select_coin_list = ['KRW-BTC', 'KRW-ETH', 'KRW-XRP', 'KRW-BCH', 'KRW-AVAX', 'KRW-DOGE', 'KRW-TRX', 'KRW-ADA', 'KRW-SOL']
     coin_list = bithumb_api.get_market_all()
 
     while True:
         for coin in select_coin_list:
             try:
-                ##ticker = coin['market']
                 ticker = coin
-
                 # OHLCV 데이터 로드 (5분봉 원하면 minute5로 변경)
                 df = bithumb_api.get_ohlcv(ticker, "minute1")
                 close_prices = df['close'].values.astype(np.float64)
@@ -88,11 +77,11 @@ if __name__ == "__main__":
                 low_prices = df['low'].values.astype(np.float64)
 
                 positions = main(ticker, close_prices, high_prices, low_prices, close_prices)
+
                 if positions:
                     now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
                     print(f"[{now}] {ticker} positions:", positions)
 
             except Exception as e:
-                print(f"Error with {coin['market']}: {e}")
-                # 에러 발생 시 해당 코인은 건너뛰기
-        time.sleep(60)  # 전체 배열 처리 후 10초 대기
+                print(f"Error with {coin}: {e}")
+            time.sleep(60)  # 전체 배열 처리 후 60초 대기
